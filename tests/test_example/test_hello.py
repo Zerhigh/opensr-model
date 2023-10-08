@@ -1,7 +1,7 @@
 """Tests for hello function."""
-import pytest
-
 from opensr_model.example import hello
+
+import pytest
 
 
 @pytest.mark.parametrize(
