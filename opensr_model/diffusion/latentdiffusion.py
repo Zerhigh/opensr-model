@@ -350,7 +350,7 @@ class DDPM(nn.Module):
                 if context is not None:
                     print(f"{context}: Restored training weights")
 
-    @torch.no_grad()
+    
     def decode_first_stage(self, z: torch.Tensor) -> torch.Tensor:
         """
         Decodes the first stage of the model.
@@ -565,7 +565,7 @@ class LatentDiffusion(DDPM):
         ).long()
         self.cond_ids[: self.num_timesteps_cond] = ids
 
-    @torch.no_grad()
+    
     def encode_first_stage(self, x: torch.Tensor) -> torch.Tensor:
         """
         Encodes the given input tensor with the first stage of the model.
@@ -578,7 +578,7 @@ class LatentDiffusion(DDPM):
         """
         return self.first_stage_model.encode(x)
 
-    @torch.no_grad()
+    
     def get_first_stage_encoding(
         self, encoder_posterior: Union[DiagonalGaussianDistribution, torch.Tensor]
     ) -> torch.Tensor:
@@ -627,8 +627,7 @@ class LatentDiffusion(DDPM):
             assert hasattr(self.cond_stage_model, self.cond_stage_forward)
             c = getattr(self.cond_stage_model, self.cond_stage_forward)(c)
         return c
-
-    @torch.no_grad()
+    
     def get_input(
         self,
         batch: torch.Tensor,
@@ -665,9 +664,9 @@ class LatentDiffusion(DDPM):
         x = x.to(self.device)
 
         # perform always for HR and for HR only of SISR
-        if self.sr_type == "SISR" or k == "image":
-            encoder_posterior = self.encode_first_stage(x)
-            z = self.get_first_stage_encoding(encoder_posterior).detach()
+        if self.sr_type == "SISR" or k == "image":            
+                encoder_posterior = self.encode_first_stage(x)
+                z = self.get_first_stage_encoding(encoder_posterior).detach()
 
         if self.model.conditioning_key is not None:
             # self.model.conditioning_key = "image" in SR example
@@ -715,8 +714,7 @@ class LatentDiffusion(DDPM):
             out.append(xc)
 
         return out
-
-    @torch.no_grad()
+    
     def compute(
         self, example: torch.Tensor, custom_steps: int = 200, temperature: float = 1.0
     ) -> torch.Tensor:

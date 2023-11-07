@@ -1,5 +1,6 @@
 from typing import List, Optional, Set, Tuple, Union
 
+import torch
 import torch as th
 from einops import rearrange
 from opensr_model.denoiser.utils import (BasicTransformerBlock, Downsample,

@@ -5,7 +5,9 @@ import requests
 import torch
 from opensr_model.diffusion.latentdiffusion import LatentDiffusion
 from skimage.exposure import match_histograms
-
+from opensr_model.diffusion.utils import DDIMSampler
+from tqdm import tqdm
+import numpy as np
 
 class SRLatentDiffusion(torch.nn.Module):
     def __init__(self, device: Union[str, torch.device] = "cpu"):
@@ -70,8 +72,10 @@ class SRLatentDiffusion(torch.nn.Module):
         self.model.device = device
         self.model = self.model.to(device)
         self.model.eval()
+        self._X = None
 
-    def _create_batch(self, X: torch.Tensor):
+    def _tensor_encode(self, X: torch.Tensor):
+        self._X = X.clone()
         # Normalize to [-1, 1]
         X = X * 2 - 1
 
@@ -82,20 +86,36 @@ class SRLatentDiffusion(torch.nn.Module):
         # Same device as the model
         X = X.to(self.device)
 
-        # Create a reference image
-        X_ref = torch.nn.functional.interpolate(
-            torch.zeros_like(X), scale_factor=4, mode="nearest"
-        )
+        return X
+    
+    def _tensor_decode(self, X: torch.Tensor, spe_cor: bool = True):
+        # decode the sample to get the generated image
+        X_sample = self.model.decode_first_stage(X)
+        
+        # Denormalize the image
+        for i in range(X_sample.shape[1]):
+            X_sample[:, i] = X_sample[:, i] * self.std[i] + self.mean[i]
+        X_sample = (X_sample + 1) / 2.0
+        
+        # Apply spectral correction
+        if spe_cor:
+            for i in range(X_sample.shape[1]):
+                X_sample[:, i] = self.hq_histogram_matching(X_sample[:, i], self._X[:, i])
 
-        return {"LR_image": X, "image": X_ref}
+        # If the value is negative, set it to 0
+        X_sample[X_sample < 0] = 0
 
-    @torch.no_grad()
+        return X_sample
+
     def forward(
         self,
         X: torch.Tensor,
+        eta: float = 1.0,
         custom_steps: int = 100,
         temperature: float = 1.0,
-        spectral_correction: bool = True,
+        histogram_matching: bool = True,
+        verbose: bool = False,
+        save_steps: bool = False                
     ):
         """Obtain the super resolution of the given image.
 
@@ -116,39 +136,58 @@ class SRLatentDiffusion(torch.nn.Module):
             torch.Tensor: The super resolved image or batch of images with a shape of
                 Cx(Wx4)x(Hx4) or BxCx(Wx4)x(Hx4).
         """
-        # Clone the input
-        X = X.clone()
 
-        # If X is a CxWxH tensor, add batch dimension
-        if len(X.shape) == 3:
-            X = X.unsqueeze(0)
+        # Normalize the image
+        Xnorm = self._tensor_encode(X)
+        
+        # Create the DDIM sampler
+        ddim = DDIMSampler(self.model)
+                
+        if save_steps:
+            for p in ddim.model.parameters():
+                p.requires_grad = False
 
-        # If X is not a float tensor, convert it
-        if X.dtype != torch.float32:
-            X = X.float()
+        # make schedule to compute alphas and sigmas
+        ddim.make_schedule(ddim_num_steps=custom_steps, ddim_eta=eta, verbose=verbose)
+        
+        # Create the HR latent image
+        img = torch.randn(X.shape, device=X.device)
 
-        # Create a batch from the input
-        batch = self._create_batch(X)
+        # Create the vector with the timesteps
+        timesteps = ddim.ddim_timesteps
+        time_range = np.flip(timesteps)
+        iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps)
 
-        # Run the model
-        Xsr = self.model.compute(
-            batch, custom_steps=custom_steps, temperature=temperature
-        )
+        # Iterate over the timesteps
+        image_container = []
+        for i, step in enumerate(iterator):
+            index = custom_steps - i - 1
+            ts = torch.full((X.shape[0],), step, device=X.device, dtype=torch.long)
+            
+            # Sample from the model using DDIM
+            outs = ddim.p_sample_ddim(
+                img,
+                Xnorm,
+                ts,
+                index=index,
+                use_original_steps=False,
+                temperature=temperature,
+                noise_dropout=0,
+                unconditional_guidance_scale=1.0,
+                unconditional_conditioning=None,
+            )
+            img, _ = outs
 
-        # Denormalize
-        for i in range(Xsr.shape[1]):
-            Xsr[:, i] = Xsr[:, i] * self.std[i] + self.mean[i]
-        Xsr = (Xsr + 1) / 2.0
+            if save_steps:
+                image_container.append(
+                    self._tensor_decode(img, spe_cor=histogram_matching)
+                )
+    
+        if save_steps:
+            return image_container
 
-        # Apply spectral correction
-        if spectral_correction:
-            for i in range(Xsr.shape[0]):
-                Xsr[i] = self.hq_histogram_matching(Xsr[i], X[i])
+        return self._tensor_decode(img, spe_cor=histogram_matching)
 
-        # If the value is negative, set it to 0
-        Xsr[Xsr < 0] = 0
-
-        return Xsr.squeeze()
 
     def hq_histogram_matching(
         self, image1: torch.Tensor, image2: torch.Tensor

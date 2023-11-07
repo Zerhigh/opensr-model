@@ -68,7 +68,6 @@ def disabled_train(self, mode: bool = True) -> nn.Module:
     return self
 
 
-@torch.no_grad()
 def make_convolutional_sample(
     batch: Tensor,
     model: nn.Module,
@@ -131,7 +130,7 @@ def make_convolutional_sample(
     # sample from the model using convsample_ddim
     with model.ema_scope("Plotting"):
         t0 = time.time()
-        sample, intermediates = sample, intermediates = convsample_ddim(
+        sample, intermediates = convsample_ddim(
             model=model,
             cond=c,
             steps=custom_steps,
@@ -184,7 +183,6 @@ def disabled_train(self: nn.Module, mode: bool = True) -> nn.Module:
     return self
 
 
-@torch.no_grad()
 def convsample_ddim(
     model: nn.Module,
     cond: Tensor,
@@ -434,7 +432,6 @@ class DDIMSampler(object):
             "ddim_sigmas_for_original_num_steps", sigmas_for_original_sampling_steps
         )
 
-    @torch.no_grad()
     def sample(
         self,
         S: int,
@@ -531,7 +528,6 @@ class DDIMSampler(object):
 
         return samples, intermediates
 
-    @torch.no_grad()
     def ddim_sampling(
         self,
         cond: Optional[Union[torch.Tensor, Dict[str, torch.Tensor]]],
@@ -627,14 +623,6 @@ class DDIMSampler(object):
             index = total_steps - i - 1
             ts = torch.full((b,), step, device=device, dtype=torch.long)
 
-            # Apply the mask if it exists
-            if mask is not None:
-                assert x0 is not None
-                img_orig = self.model.q_sample(
-                    x0, ts
-                )  # TODO: deterministic forward pass?
-                img = img_orig * mask + (1.0 - mask) * img
-
             # Sample from the model using DDIM
             outs = self.p_sample_ddim(
                 img,
@@ -642,21 +630,13 @@ class DDIMSampler(object):
                 ts,
                 index=index,
                 use_original_steps=ddim_use_original_steps,
-                quantize_denoised=quantize_denoised,
                 temperature=temperature,
                 noise_dropout=noise_dropout,
-                score_corrector=score_corrector,
-                corrector_kwargs=corrector_kwargs,
                 unconditional_guidance_scale=unconditional_guidance_scale,
                 unconditional_conditioning=unconditional_conditioning,
             )
             img, pred_x0 = outs
 
-            # Call the callback functions if they exist
-            if callback:
-                callback(i)
-            if img_callback:
-                img_callback(pred_x0, i)
 
             # Append the intermediate results to the intermediates dictionary
             if index % log_every_t == 0 or index == total_steps - 1:
@@ -665,7 +645,6 @@ class DDIMSampler(object):
 
         return img, intermediates
 
-    @torch.no_grad()
     def p_sample_ddim(
         self,
         x: torch.Tensor,
@@ -674,11 +653,8 @@ class DDIMSampler(object):
         index: int,
         repeat_noise: bool = False,
         use_original_steps: bool = False,
-        quantize_denoised: bool = False,
         temperature: float = 1.0,
         noise_dropout: float = 0.0,
-        score_corrector: Optional[callable] = None,
-        corrector_kwargs: Optional[Dict[str, Any]] = None,
         unconditional_guidance_scale: float = 1.0,
         unconditional_conditioning: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -715,20 +691,13 @@ class DDIMSampler(object):
 
         # apply model with or without unconditional conditioning
         if unconditional_conditioning is None or unconditional_guidance_scale == 1.0:
-            e_t = self.model.apply_model(x, t, c)
+            e_t = self.model.apply_model(x, t, c) 
         else:
             x_in = torch.cat([x] * 2)
             t_in = torch.cat([t] * 2)
             c_in = torch.cat([unconditional_conditioning, c])
             e_t_uncond, e_t = self.model.apply_model(x_in, t_in, c_in).chunk(2)
             e_t = e_t_uncond + unconditional_guidance_scale * (e_t - e_t_uncond)
-
-        # apply score corrector if provided
-        if score_corrector is not None:
-            assert self.model.parameterization == "eps"
-            e_t = score_corrector.modify_score(
-                self.model, e_t, x, t, c, **corrector_kwargs
-            )
 
         # get alphas, alphas_prev, sqrt_one_minus_alphas, and sigmas
         alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
@@ -758,8 +727,6 @@ class DDIMSampler(object):
 
         # current prediction for x_0
         pred_x0 = (x - sqrt_one_minus_at * e_t) / a_t.sqrt()
-        if quantize_denoised:
-            pred_x0, _, *_ = self.model.first_stage_model.quantize(pred_x0)
 
         # direction pointing to x_t
         dir_xt = (1.0 - a_prev - sigma_t**2).sqrt() * e_t
@@ -891,7 +858,7 @@ class LitEma(nn.Module):
 
         one_minus_decay = 1.0 - decay
 
-        with torch.no_grad():
+        with True:
             m_param = dict(model.named_parameters())
             shadow_params = dict(self.named_buffers())
 
