@@ -72,30 +72,8 @@ class DiffusionWrapper(nn.Module):
         Raises:
             NotImplementedError: If the conditioning key is not one of the supported values.
         """
-        if self.conditioning_key is None:
-            out = self.diffusion_model(x, t)
-        elif self.conditioning_key == "concat":
-            # Concatenate the input tensor with the conditioning tensors
-            xc = torch.cat([x] + c_concat, dim=1)
-            out = self.diffusion_model(xc, t)
-        elif self.conditioning_key == "crossattn":
-            # Concatenate the cross-attention tensors and pass them as context to the diffusion model
-            cc = torch.cat(c_crossattn, 1)
-            out = self.diffusion_model(x, t, context=cc)
-        elif self.conditioning_key == "hybrid":
-            # Concatenate the input tensor with the conditioning tensors and concatenate the cross-attention tensors
-            xc = torch.cat([x] + c_concat, dim=1)
-            cc = torch.cat(c_crossattn, 1)
-            out = self.diffusion_model(xc, t, context=cc)
-        elif self.conditioning_key == "adm":
-            # Use the first cross-attention tensor as the output of an auxiliary decoder and pass it as input to the main decoder
-            cc = c_crossattn[0]
-            out = self.diffusion_model(x, t, y=cc)
-        else:
-            raise NotImplementedError(
-                f"Unsupported conditioning key: {self.conditioning_key}"
-            )
-
+        xc = torch.cat([x] + c_concat, dim=1)
+        out = self.diffusion_model(xc, t)
         return out
 
 
@@ -402,6 +380,7 @@ class DDPM(nn.Module):
                 decoded = fold(o)
                 decoded = decoded / normalization  # norm is shape (1, 1, h, w)
                 return decoded
+            
             else:
                 return self.first_stage_model.decode(z)
 

@@ -226,7 +226,7 @@ class AttentionBlock(nn.Module):
         Returns:
             torch.Tensor: The output tensor.
         """
-        return checkpoint(self._forward, (x,), self.parameters(), True)
+        return checkpoint(self._forward, (x,), self.parameters(), False)
 
     def _forward(self, x: torch.Tensor) -> torch.Tensor:
         """

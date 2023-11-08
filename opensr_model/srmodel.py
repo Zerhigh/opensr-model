@@ -5,9 +5,11 @@ import requests
 import torch
 from opensr_model.diffusion.latentdiffusion import LatentDiffusion
 from skimage.exposure import match_histograms
+import torch.utils.checkpoint as checkpoint
 from opensr_model.diffusion.utils import DDIMSampler
 from tqdm import tqdm
 import numpy as np
+from typing import Literal
 
 class SRLatentDiffusion(torch.nn.Module):
     def __init__(self, device: Union[str, torch.device] = "cpu"):
@@ -106,7 +108,129 @@ class SRLatentDiffusion(torch.nn.Module):
         X_sample[X_sample < 0] = 0
 
         return X_sample
+    
+    def _prepare_model(
+        self,
+        X: torch.Tensor,
+        eta: float = 1.0,
+        custom_steps: int = 100,
+        verbose: bool = False 
+    ):
+        # Create the DDIM sampler
+        ddim = DDIMSampler(self.model)
+        
+        # make schedule to compute alphas and sigmas
+        ddim.make_schedule(ddim_num_steps=custom_steps, ddim_eta=eta, verbose=verbose)
+        
+        # Create the HR latent image
+        latent = torch.randn(X.shape, device=X.device)
+                
+        # Create the vector with the timesteps
+        timesteps = ddim.ddim_timesteps
+        time_range = np.flip(timesteps)
+        
+        return ddim, latent, time_range
 
+    def _attribution_methods(
+        self,
+        X: torch.Tensor,
+        grads: torch.Tensor,
+        attribution_method: Literal[
+            "grad_x_input", "max_grad", "mean_grad", "min_grad"            
+        ],
+    ):
+        if attribution_method == "grad_x_input":
+            return torch.norm(grads * X, dim=(0, 1))
+        elif attribution_method == "max_grad":
+            return grads.abs().max(dim=0).max(dim=0)
+        elif attribution_method == "mean_grad":
+            return grads.abs().mean(dim=0).mean(dim=0)
+        elif attribution_method == "min_grad":
+            return grads.abs().min(dim=0).min(dim=0)
+        else:
+            raise ValueError(
+                "The attribution method must be one of: grad_x_input, max_grad, mean_grad, min_grad"
+            )
+    
+    def explainer(
+        self,
+        X: torch.Tensor,
+        mask: torch.Tensor,
+        eta: float = 1.0,
+        temperature: float = 1.0,
+        custom_steps: int = 100,
+        steps_to_consider_for_attributions: list = list(range(100)),
+        attribution_method: Literal[
+            "grad_x_input", "max_grad", "mean_grad", "min_grad"
+        ] = "grad_x_input",      
+        verbose: bool = False,
+        enable_checkpoint = True,
+        histogram_matching=True        
+    ):
+        # Normalize the image
+        X = X.clone()
+        Xnorm = self._tensor_encode(X)
+        
+        # ddim, latent and time_range
+        ddim, latent, time_range = self._prepare_model(
+            X=Xnorm, eta=eta, custom_steps=custom_steps, verbose=verbose
+        )
+                    
+        # Iterate over the timesteps
+        container = []
+        iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps)
+        for i, step in enumerate(iterator):
+            
+            # Activate or deactivate gradient tracking
+            if i in steps_to_consider_for_attributions:
+                torch.set_grad_enabled(True)
+            else:
+                torch.set_grad_enabled(False)
+            
+            # Compute the latent image
+            if enable_checkpoint:
+                outs = checkpoint.checkpoint(
+                    ddim.p_sample_ddim,
+                    latent,
+                    Xnorm,
+                    step,
+                    custom_steps - i - 1,
+                    temperature,
+                    use_reentrant=False,
+                )
+            else:                
+                outs = ddim.p_sample_ddim(
+                    x=latent,
+                    c=Xnorm,
+                    t=step,
+                    index=custom_steps - i - 1,
+                    temperature=temperature
+                )
+            latent, _ = outs
+            
+            
+            if i not in steps_to_consider_for_attributions:
+                continue
+            
+            # Apply the mask
+            output_graph = (latent*mask).mean()
+            
+            # Compute the gradients
+            grads = torch.autograd.grad(output_graph, Xnorm, retain_graph=True)[0]
+            
+            # Compute the attribution and save it
+            with torch.no_grad():
+                to_save = {
+                    "latent": self._tensor_decode(latent, spe_cor=histogram_matching),
+                    "attribution": self._attribution_methods(
+                        Xnorm, grads, attribution_method
+                    )
+                }
+            container.append(to_save)
+        
+        return container
+
+    @torch.no_grad()
     def forward(
         self,
         X: torch.Tensor,
@@ -114,8 +238,7 @@ class SRLatentDiffusion(torch.nn.Module):
         custom_steps: int = 100,
         temperature: float = 1.0,
         histogram_matching: bool = True,
-        verbose: bool = False,
-        save_steps: bool = False                
+        verbose: bool = False
     ):
         """Obtain the super resolution of the given image.
 
@@ -136,55 +259,27 @@ class SRLatentDiffusion(torch.nn.Module):
             torch.Tensor: The super resolved image or batch of images with a shape of
                 Cx(Wx4)x(Hx4) or BxCx(Wx4)x(Hx4).
         """
-
+        
         # Normalize the image
         Xnorm = self._tensor_encode(X)
         
-        # Create the DDIM sampler
-        ddim = DDIMSampler(self.model)
-                
-        if save_steps:
-            for p in ddim.model.parameters():
-                p.requires_grad = False
-
-        # make schedule to compute alphas and sigmas
-        ddim.make_schedule(ddim_num_steps=custom_steps, ddim_eta=eta, verbose=verbose)
-        
-        # Create the HR latent image
-        img = torch.randn(X.shape, device=X.device)
-
-        # Create the vector with the timesteps
-        timesteps = ddim.ddim_timesteps
-        time_range = np.flip(timesteps)
+        # ddim, latent and time_range
+        ddim, latent, time_range = self._prepare_model(
+            X=Xnorm, eta=eta, custom_steps=custom_steps, verbose=verbose
+        )
         iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps)
 
         # Iterate over the timesteps
-        image_container = []
         for i, step in enumerate(iterator):
-            index = custom_steps - i - 1
-            ts = torch.full((X.shape[0],), step, device=X.device, dtype=torch.long)
-            
-            # Sample from the model using DDIM
             outs = ddim.p_sample_ddim(
-                img,
-                Xnorm,
-                ts,
-                index=index,
+                x=latent,
+                c=Xnorm,
+                t=step,
+                index=custom_steps - i - 1,
                 use_original_steps=False,
-                temperature=temperature,
-                noise_dropout=0,
-                unconditional_guidance_scale=1.0,
-                unconditional_conditioning=None,
+                temperature=temperature
             )
             img, _ = outs
-
-            if save_steps:
-                image_container.append(
-                    self._tensor_decode(img, spe_cor=histogram_matching)
-                )
-    
-        if save_steps:
-            return image_container
 
         return self._tensor_decode(img, spe_cor=histogram_matching)
 
@@ -246,3 +341,7 @@ class SRLatentDiffusion(torch.nn.Module):
 
         self.model.load_state_dict(weights, strict=True)
         print("Loaded pretrained weights from: ", weights_file)
+
+
+
+

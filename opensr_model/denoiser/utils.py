@@ -783,7 +783,7 @@ class BasicTransformerBlock(nn.Module):
         dropout: float = 0.0,
         context_dim: Optional[int] = None,
         gated_ff: bool = True,
-        checkpoint: bool = True,
+        checkpoint: bool = False,
     ) -> None:
         """
         Initialize the basic transformer block.
@@ -830,7 +830,7 @@ class BasicTransformerBlock(nn.Module):
             torch.Tensor: The output tensor of shape `(batch_size, seq_len, dim)`.
         """
         return checkpoint(
-            self._forward, (x, context), self.parameters(), self.checkpoint
+            self._forward, (x, context), self.parameters(), False#self.checkpoint
         )
 
     def _forward(

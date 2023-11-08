@@ -653,10 +653,7 @@ class DDIMSampler(object):
         index: int,
         repeat_noise: bool = False,
         use_original_steps: bool = False,
-        temperature: float = 1.0,
-        noise_dropout: float = 0.0,
-        unconditional_guidance_scale: float = 1.0,
-        unconditional_conditioning: Optional[torch.Tensor] = None,
+        temperature: float = 1.0
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Samples from the model using DDIM sampling.
@@ -685,19 +682,13 @@ class DDIMSampler(object):
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Tuple containing the generated samples and intermediate results.
         """
-
+        t = torch.full((x.shape[0],), t, device=x.device, dtype=torch.long)
+                
         # get batch size and device
         b, *_, device = *x.shape, x.device
 
         # apply model with or without unconditional conditioning
-        if unconditional_conditioning is None or unconditional_guidance_scale == 1.0:
-            e_t = self.model.apply_model(x, t, c) 
-        else:
-            x_in = torch.cat([x] * 2)
-            t_in = torch.cat([t] * 2)
-            c_in = torch.cat([unconditional_conditioning, c])
-            e_t_uncond, e_t = self.model.apply_model(x_in, t_in, c_in).chunk(2)
-            e_t = e_t_uncond + unconditional_guidance_scale * (e_t - e_t_uncond)
+        e_t = self.model.apply_model(x, t, c) 
 
         # get alphas, alphas_prev, sqrt_one_minus_alphas, and sigmas
         alphas = self.model.alphas_cumprod if use_original_steps else self.ddim_alphas
@@ -731,8 +722,6 @@ class DDIMSampler(object):
         # direction pointing to x_t
         dir_xt = (1.0 - a_prev - sigma_t**2).sqrt() * e_t
         noise = sigma_t * noise_like(x.shape, device, repeat_noise) * temperature
-        if noise_dropout > 0.0:
-            noise = torch.nn.functional.dropout(noise, p=noise_dropout)
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
 
         return x_prev, pred_x0
