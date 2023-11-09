@@ -5,7 +5,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "opensr-model"
-version = "0.1.8"
+version = "0.1.9"
 description = "Latent diffusion model trained in RGBN optical remote sensing imagery"
 readme = "README.md"
 authors = ["opensr-model <csaybar@gmail.com>"]

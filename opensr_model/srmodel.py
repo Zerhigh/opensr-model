@@ -261,6 +261,7 @@ class SRLatentDiffusion(torch.nn.Module):
         """
         
         # Normalize the image
+        X = X.clone()
         Xnorm = self._tensor_encode(X)
         
         # ddim, latent and time_range
@@ -279,9 +280,9 @@ class SRLatentDiffusion(torch.nn.Module):
                 use_original_steps=False,
                 temperature=temperature
             )
-            img, _ = outs
+            latent, _ = outs
 
-        return self._tensor_decode(img, spe_cor=histogram_matching)
+        return self._tensor_decode(latent, spe_cor=histogram_matching)
 
 
     def hq_histogram_matching(
