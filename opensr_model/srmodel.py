@@ -238,6 +238,7 @@ class SRLatentDiffusion(torch.nn.Module):
         custom_steps: int = 100,
         temperature: float = 1.0,
         histogram_matching: bool = True,
+        save_iterations: bool = False,
         verbose: bool = False
     ):
         """Obtain the super resolution of the given image.
@@ -271,6 +272,9 @@ class SRLatentDiffusion(torch.nn.Module):
         iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps)
 
         # Iterate over the timesteps
+        if save_iterations:
+            save_iters = []
+            
         for i, step in enumerate(iterator):
             outs = ddim.p_sample_ddim(
                 x=latent,
@@ -281,7 +285,15 @@ class SRLatentDiffusion(torch.nn.Module):
                 temperature=temperature
             )
             latent, _ = outs
-
+            
+            if save_iterations:
+                save_iters.append(
+                    self._tensor_decode(latent, spe_cor=histogram_matching)
+                )
+        
+        if save_iterations:
+            return save_iters
+        
         return self._tensor_decode(latent, spe_cor=histogram_matching)
 
 
