@@ -692,6 +692,17 @@ class LatentDiffusion(DDPM):
         if return_original_cond:
             out.append(xc)
 
+        # overwrite LR original with encoded LR if wanted
+        self.encode_conditioning = True
+        if self.encode_conditioning==True and self.sr_type=="SISR":
+            #print("Encoding conditioning!")
+            # try to upsample->encode conditioning
+            c = torch.nn.functional.interpolate(out[1], size=(512,512), mode='bilinear', align_corners=False)
+            # encode c
+            c = self.encode_first_stage(c).sample()
+            out[1] = c
+        
+
         return out
     
     def compute(
