@@ -14,7 +14,7 @@ from typing import Literal
 from opensr_model.utils import linear_transform
 
 class SRLatentDiffusion(torch.nn.Module):
-    def __init__(self, bands = "10m", device: Union[str, torch.device] = "cpu"):
+    def __init__(self, bands: str = "10m", device: Union[str, torch.device] = "cpu"):
         super().__init__()
 
         # Set parameters depending on band selection
@@ -129,59 +129,6 @@ class SRLatentDiffusion(torch.nn.Module):
         X_dec[X_dec < 0] = 0    
         return X_dec
     
-    """
-    # remove previous when appropriate
-    def set_mean_std(self):
-        mean = [
-                -0.7383498348772526,
-                -0.7252872248232365,
-                -0.7637851044356823,
-                -0.6586044501721859,
-                    ]
-        std = [
-                0.0726721865855623,
-                0.06286528447978199,
-                0.050181950839143244,
-                0.07026348426636543,
-                    ] 
-        return mean,std
-    def _tensor_encode(self, X: torch.Tensor):
-        self._X = X.clone()
-        # Normalize to [-1, 1]
-        X = X * 2 - 1
-
-        # Apply means and stds to each band
-        # NORM HERE
-        for i in range(X.shape[1]):
-            X[:, i] = (X[:, i] - self.mean[i]) / self.std[i]
-
-        # Same device as the model
-        X = X.to(self.device)
-
-        return X
-
-    
-    def _tensor_decode(self, X: torch.Tensor, spe_cor: bool = True):
-        # decode the sample to get the generated image
-        X_sample = self.model.decode_first_stage(X)
-        
-        # Denormalize the image
-        # DENORM HERE
-        for i in range(X_sample.shape[1]):
-            X_sample[:, i] = X_sample[:, i] * self.std[i] + self.mean[i]
-        X_sample = (X_sample + 1) / 2.0
-        
-        # Apply spectral correction
-        if spe_cor:
-            for i in range(X_sample.shape[1]):
-                X_sample[:, i] = self.hq_histogram_matching(X_sample[:, i], self._X[:, i])
-
-        # If the value is negative, set it to 0
-        X_sample[X_sample < 0] = 0
-
-        return X_sample
-    """
-    
     def _prepare_model(
         self,
         X: torch.Tensor,
@@ -240,7 +187,7 @@ class SRLatentDiffusion(torch.nn.Module):
         enable_checkpoint = True,
         histogram_matching=True        
     ):
-        # Normalize the image
+        # Normalize and encode the LR image
         X = X.clone()
         Xnorm = self._tensor_encode(X)
         
