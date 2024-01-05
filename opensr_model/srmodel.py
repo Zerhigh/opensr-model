@@ -11,7 +11,6 @@ from tqdm import tqdm
 import numpy as np
 from typing import Literal
 
-from opensr_model.utils import linear_transform
 
 class SRLatentDiffusion(torch.nn.Module):
     def __init__(self, bands: str = "10m", device: Union[str, torch.device] = "cpu"):
@@ -51,7 +50,9 @@ class SRLatentDiffusion(torch.nn.Module):
     def set_model_settings(self):
         # set up model settings
         if self.band_config == "10m":
+            print("Creating model for 4x 10m bands...")
             first_stage_config = {
+                "embed_dim":4,
                 "double_z": True,
                 "z_channels": 4,
                 "resolution": 256,
@@ -73,13 +74,19 @@ class SRLatentDiffusion(torch.nn.Module):
                 "channel_mult": [1, 2, 2, 4],
                 "num_head_channels": 32,
             }
+            # set transform for 10m
+            from opensr_model.utils import linear_transform_4b
+            self.linear_transform = linear_transform_4b
+
             return first_stage_config, cond_stage_config
 
         if self.band_config == "20m":
+            print("Creating model for 6x 20m bands...")
             first_stage_config = {
+                "embed_dim":6,
                 "double_z": True,
-                "z_channels": 4,
-                "resolution": 256,
+                "z_channels": 6,
+                "resolution": 512,
                 "in_channels": 6,
                 "out_ch": 6,
                 "ch": 128,
@@ -98,6 +105,10 @@ class SRLatentDiffusion(torch.nn.Module):
                 "channel_mult": [1, 2, 2, 4],
                 "num_head_channels": 32,
             }
+            # set transform for 20m
+            from opensr_model.utils import linear_transform_6b
+            self.linear_transform = linear_transform_6b
+            # return configs
             return first_stage_config, cond_stage_config
 
         
@@ -105,7 +116,7 @@ class SRLatentDiffusion(torch.nn.Module):
         # set copy to model
         self._X = X.clone()
         # normalize image
-        X_enc = linear_transform(X, stage="norm")
+        X_enc = self.linear_transform(X, stage="norm")
         # encode LR images
         self.encode_conditioning = True
         if self.encode_conditioning==True and self.sr_type=="SISR":
@@ -120,7 +131,7 @@ class SRLatentDiffusion(torch.nn.Module):
     def _tensor_decode(self, X_enc: torch.Tensor, spe_cor: bool = True):       
         # Decode
         X_dec = self.model.decode_first_stage(X_enc)
-        X_dec = linear_transform(X_dec, stage="denorm")
+        X_dec = self.linear_transform(X_dec, stage="denorm")
         # Apply spectral correction
         if spe_cor:
             for i in range(X_dec.shape[1]):

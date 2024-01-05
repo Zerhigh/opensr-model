@@ -489,7 +489,8 @@ class LatentDiffusion(DDPM):
         self.sr_type = "SISR"
 
         # Setup the AutoencoderKL model
-        self.first_stage_model = AutoencoderKL(first_stage_config, embed_dim=4)
+        embed_dim = first_stage_config["embed_dim"] # extract embedded dim fro first stage config
+        self.first_stage_model = AutoencoderKL(first_stage_config, embed_dim=embed_dim)
         self.first_stage_model.eval()
         self.first_stage_model.train = disabled_train
         for param in self.first_stage_model.parameters():

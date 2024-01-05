@@ -2,7 +2,7 @@ import torch
 from einops import rearrange
 
 
-def linear_transform(t_input,stage="norm"):
+def linear_transform_4b(t_input,stage="norm"):
     assert stage in ["norm","denorm"]
     # get the shape of the tensor
     shape = t_input.shape
@@ -14,7 +14,7 @@ def linear_transform(t_input,stage="norm"):
             stack2 = []
             for i in range(0, t_input.size(1), 4):
                 slice_tensor = batch[i:i+4, :, :, :]
-                slice_denorm = linear_transform(slice_tensor,stage=stage)
+                slice_denorm = linear_transform_4b(slice_tensor,stage=stage)
                 stack2.append(slice_denorm)
             stack2 = torch.stack(stack2)
             stack2 = stack2.reshape(shape[1], shape[2], shape[3], shape[4])
@@ -56,7 +56,7 @@ def linear_transform(t_input,stage="norm"):
             # bring to 0..1
             t = (t+1)/2
             # divide according to conventions
-            t[:,:,0] = t[:,:,1] * (rgb_c / 10.0) # R
+            t[:,:,0] = t[:,:,0] * (rgb_c / 10.0) # R
             t[:,:,1] = t[:,:,1] * (rgb_c / 10.0) # G
             t[:,:,2] = t[:,:,2] * (rgb_c / 10.0) # B
             t[:,:,3] = t[:,:,3] * (nir_c / 10.0) # NIR
@@ -77,3 +77,41 @@ def linear_transform(t_input,stage="norm"):
 
     return(t_output)
 
+
+def linear_transform_6b(t_input,stage="norm"):
+    # iterate over batches
+    bands_c = 5.
+    return_ls = []
+    for t in t_input:
+        if stage == "norm":
+            # divide according to conventions
+            t[:,:,0] = t[:,:,0] * (10.0 / bands_c) 
+            t[:,:,1] = t[:,:,1] * (10.0 / bands_c) 
+            t[:,:,2] = t[:,:,2] * (10.0 / bands_c) 
+            t[:,:,3] = t[:,:,3] * (10.0 / bands_c) 
+            t[:,:,4] = t[:,:,4] * (10.0 / bands_c) 
+            t[:,:,5] = t[:,:,5] * (10.0 / bands_c) 
+            # clamp to get rif of outlier pixels
+            t = t.clamp(0,1)
+            # bring to -1..+1
+            t = (t*2)-1
+        if stage == "denorm":
+            # bring to 0..1
+            t = (t+1)/2
+            # divide according to conventions
+            t[:,:,0] = t[:,:,0] * (bands_c / 10.0) 
+            t[:,:,1] = t[:,:,1] * (bands_c / 10.0) 
+            t[:,:,2] = t[:,:,2] * (bands_c / 10.0) 
+            t[:,:,3] = t[:,:,3] * (bands_c / 10.0) 
+            t[:,:,4] = t[:,:,4] * (bands_c / 10.0)
+            t[:,:,5] = t[:,:,5] * (bands_c / 10.0)
+            # clamp to get rif of outlier pixels
+            t = t.clamp(0,1)
+        
+        # append result to list
+        return_ls.append(t)
+
+    # after loop, stack image
+    t_output = torch.stack(return_ls)
+
+    return t_output
