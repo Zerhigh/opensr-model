@@ -11,37 +11,18 @@ from tqdm import tqdm
 import numpy as np
 from typing import Literal
 
+from opensr_model.utils import linear_transform
+
 class SRLatentDiffusion(torch.nn.Module):
-    def __init__(self, device: Union[str, torch.device] = "cpu"):
+    def __init__(self, bands = "10m", device: Union[str, torch.device] = "cpu"):
         super().__init__()
 
-        # Parameters used in the autoencoder
-        first_stage_config = {
-            "double_z": True,
-            "z_channels": 4,
-            "resolution": 256,
-            "in_channels": 4,
-            "out_ch": 4,
-            "ch": 128,
-            "ch_mult": [1, 2, 4],
-            "num_res_blocks": 2,
-            "attn_resolutions": [],
-            "dropout": 0.0,
-        }
-
-        # Parameters used in the denoiser
-        cond_stage_config = {
-            "image_size": 64,
-            "in_channels": 8,
-            "model_channels": 160,
-            "out_channels": 4,
-            "num_res_blocks": 2,
-            "attention_resolutions": [16, 8],
-            "channel_mult": [1, 2, 2, 4],
-            "num_head_channels": 32,
-        }
+        # Set parameters depending on band selection
+        self.band_config = bands
+        assert self.band_config in ["10m", "20m"], "band selection incorrect"
 
         # Set up the model
+        first_stage_config, cond_stage_config = self.set_model_settings()
         self.model = LatentDiffusion(
             first_stage_config,
             cond_stage_config,
@@ -55,33 +36,122 @@ class SRLatentDiffusion(torch.nn.Module):
             cond_stage_key="LR_image",
         )
 
-        # Apply normalization
-        self.mean = [
-            -0.7383498348772526,
-            -0.7252872248232365,
-            -0.7637851044356823,
-            -0.6586044501721859,
-        ]
-        self.std = [
-            0.0726721865855623,
-            0.06286528447978199,
-            0.050181950839143244,
-            0.07026348426636543,
-        ]
+        # set up mean/std - TODO: remove in future
+        #self.mean, self.std = self.set_mean_std()
 
         # Set up the model for inference
-        self.device = device
-        self.model.device = device
-        self.model = self.model.to(device)
-        self.model.eval()
-        self._X = None
+        self.device = device # set self device
+        self.model.device = device # set model device as selected
+        self.model = self.model.to(device) # move model to device
+        self.model.eval() # set model state
+        self._X = None # placeholder for LR image
+        self.encode_conditioning = True # encode LR images before dif?
+        self.sr_type = "SISR" # set wether SISR or MIRS
 
+    def set_model_settings(self):
+        # set up model settings
+        if self.band_config == "10m":
+            first_stage_config = {
+                "double_z": True,
+                "z_channels": 4,
+                "resolution": 256,
+                "in_channels": 4,
+                "out_ch": 4,
+                "ch": 128,
+                "ch_mult": [1, 2, 4],
+                "num_res_blocks": 2,
+                "attn_resolutions": [],
+                "dropout": 0.0,
+            }
+            cond_stage_config = {
+                "image_size": 64,
+                "in_channels": 8,
+                "model_channels": 160,
+                "out_channels": 4,
+                "num_res_blocks": 2,
+                "attention_resolutions": [16, 8],
+                "channel_mult": [1, 2, 2, 4],
+                "num_head_channels": 32,
+            }
+            return first_stage_config, cond_stage_config
+
+        if self.band_config == "20m":
+            first_stage_config = {
+                "double_z": True,
+                "z_channels": 4,
+                "resolution": 256,
+                "in_channels": 6,
+                "out_ch": 6,
+                "ch": 128,
+                "ch_mult": [1, 2, 4],
+                "num_res_blocks": 2,
+                "attn_resolutions": [],
+                "dropout": 0.0,
+            }
+            cond_stage_config = {
+                "image_size": 64,
+                "in_channels": 12,
+                "model_channels": 160,
+                "out_channels": 6,
+                "num_res_blocks": 2,
+                "attention_resolutions": [16, 8],
+                "channel_mult": [1, 2, 2, 4],
+                "num_head_channels": 32,
+            }
+            return first_stage_config, cond_stage_config
+
+        
+    def _tensor_encode(self,X: torch.Tensor):
+        # set copy to model
+        self._X = X.clone()
+        # normalize image
+        X_enc = linear_transform(X, stage="norm")
+        # encode LR images
+        self.encode_conditioning = True
+        if self.encode_conditioning==True and self.sr_type=="SISR":
+            # try to upsample->encode conditioning
+            X_int = torch.nn.functional.interpolate(X, size=(512,512), mode='bilinear', align_corners=False)
+            # encode conditioning
+            X_enc = self.model.first_stage_model.encode(X_int).sample()
+        # move to same device as the model
+        X_enc = X_enc.to(self.device)
+        return X_enc
+
+    def _tensor_decode(self, X_enc: torch.Tensor, spe_cor: bool = True):       
+        # Decode
+        X_dec = self.model.decode_first_stage(X_enc)
+        X_dec = linear_transform(X_dec, stage="denorm")
+        # Apply spectral correction
+        if spe_cor:
+            for i in range(X_dec.shape[1]):
+                X_dec[:, i] = self.hq_histogram_matching(X_dec[:, i], self._X[:, i])
+        # If the value is negative, set it to 0
+        X_dec[X_dec < 0] = 0    
+        return X_dec
+    
+    """
+    # remove previous when appropriate
+    def set_mean_std(self):
+        mean = [
+                -0.7383498348772526,
+                -0.7252872248232365,
+                -0.7637851044356823,
+                -0.6586044501721859,
+                    ]
+        std = [
+                0.0726721865855623,
+                0.06286528447978199,
+                0.050181950839143244,
+                0.07026348426636543,
+                    ] 
+        return mean,std
     def _tensor_encode(self, X: torch.Tensor):
         self._X = X.clone()
         # Normalize to [-1, 1]
         X = X * 2 - 1
 
         # Apply means and stds to each band
+        # NORM HERE
         for i in range(X.shape[1]):
             X[:, i] = (X[:, i] - self.mean[i]) / self.std[i]
 
@@ -89,12 +159,14 @@ class SRLatentDiffusion(torch.nn.Module):
         X = X.to(self.device)
 
         return X
+
     
     def _tensor_decode(self, X: torch.Tensor, spe_cor: bool = True):
         # decode the sample to get the generated image
         X_sample = self.model.decode_first_stage(X)
         
         # Denormalize the image
+        # DENORM HERE
         for i in range(X_sample.shape[1]):
             X_sample[:, i] = X_sample[:, i] * self.std[i] + self.mean[i]
         X_sample = (X_sample + 1) / 2.0
@@ -108,6 +180,7 @@ class SRLatentDiffusion(torch.nn.Module):
         X_sample[X_sample < 0] = 0
 
         return X_sample
+    """
     
     def _prepare_model(
         self,

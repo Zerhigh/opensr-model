@@ -9,8 +9,14 @@ from tqdm import tqdm
 
 # Load the model --------------------------------------------------------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model = opensr_model.SRLatentDiffusion(device=device)
-model.load_pretrained("sr_checkpoint.ckpt")
+device = "cpu"
+
+#model = opensr_model.SRLatentDiffusion(bands="20m",device=device) # 20m
+#model.load_pretrained("opensr_20m_v1.ckpt") # 20m
+
+model = opensr_model.SRLatentDiffusion(bands="10m",device=device) # 10m
+model.load_pretrained("opensr_10m_v4.ckpt") # 10m
+
 model.eval()
 
 # Download image --------------------------------------------------------------
@@ -22,6 +28,7 @@ with open("demo.safetensors", "wb") as f:
 X = safetensors.torch.load_file("demo.safetensors")["lr_data"]
 X = X.to(device)*1
 
+sr = model(X)
 
 # make a prediction -----------------------------------------------------------
 mask = X[0, 0]* 0

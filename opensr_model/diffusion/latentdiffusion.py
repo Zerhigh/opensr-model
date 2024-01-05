@@ -692,6 +692,7 @@ class LatentDiffusion(DDPM):
         if return_original_cond:
             out.append(xc)
 
+        """
         # overwrite LR original with encoded LR if wanted
         self.encode_conditioning = True
         if self.encode_conditioning==True and self.sr_type=="SISR":
@@ -701,6 +702,7 @@ class LatentDiffusion(DDPM):
             # encode c
             c = self.encode_first_stage(c).sample()
             out[1] = c
+        """
         
 
         return out
