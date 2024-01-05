@@ -9,9 +9,29 @@ from tqdm import tqdm
 
 # Load the model --------------------------------------------------------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model = opensr_model.SRLatentDiffusion(device=device)
-model.load_pretrained("sr_checkpoint.ckpt")
-model.eval()
+
+# set the type of model, 4x10m or 6x20m
+model_type = "10m"
+assert model_type in ["10m","20m"], "model_type must be either 10m or 20m"
+
+if model_type == "10m": # if 10m, create according model and load ckpt
+    model = opensr_model.SRLatentDiffusion(bands=model_type,device=device) # 10m
+    model.load_pretrained("opensr_10m_v4.ckpt") # 10m
+
+if model_type == "20m": # if 20m, create according model and load ckpt
+    model = opensr_model.SRLatentDiffusion(bands=model_type,device=device) # 20m
+    model.load_pretrained("opensr_20m_v1.ckpt") # 20m
+
+# set model to eval mode
+model = model.eval()
+
+# test capability of selected model --------------------------------------------
+if model_type == "10m":
+    X = torch.rand(1,4,128,128)
+if model_type == "20m":
+    X = torch.rand(1,6,128,128)
+sr = model(X)
+assert sr.shape == (1,X.shape[1],512,512), "Model does not produce expected output shape"
 
 # Download image --------------------------------------------------------------
 file = "https://huggingface.co/datasets/jfloresf/demo/resolve/main/lr_000008.safetensors"
@@ -21,7 +41,6 @@ with open("demo.safetensors", "wb") as f:
     
 X = safetensors.torch.load_file("demo.safetensors")["lr_data"]
 X = X.to(device)*1
-
 
 # make a prediction -----------------------------------------------------------
 mask = X[0, 0]* 0
