@@ -370,7 +370,7 @@ class SRLatentDiffusion(torch.nn.Module):
         # download pretrained model
         #hf_model = "https://huggingface.co/isp-uv-es/opensr-model/resolve/main/sr_checkpoint.ckpt" # original one
         # create download link based on input 
-        hf_model = str("https://huggingface.co/simon-donike/RS-SR-LTDF/blob/main/"+str(weights_file))
+        hf_model = str("https://huggingface.co/simon-donike/RS-SR-LTDF/resolve/main/"+str(weights_file))
         
         # download pretrained model
         if not pathlib.Path(weights_file).exists():
