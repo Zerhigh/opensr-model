@@ -1,3 +1,6 @@
+# ESA OpenSR packages
+opensr_model
+
 # Tensors
 torch==1.13.1
 pytorch-lightning==1.9.0

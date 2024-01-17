@@ -209,7 +209,7 @@ class SRLatentDiffusion(torch.nn.Module):
                     
         # Iterate over the timesteps
         container = []
-        iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps)
+        iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps,disable=True)
         for i, step in enumerate(iterator):
             
             # Activate or deactivate gradient tracking

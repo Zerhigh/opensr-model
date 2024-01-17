@@ -9,9 +9,9 @@ from tqdm import tqdm
 from einops import rearrange
 import matplotlib.pyplot as plt
 
+
 # Load the model --------------------------------------------------------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
-device = "cpu"
 
 # set the type of model, 4x10m or 6x20m
 model_type = "20m"
