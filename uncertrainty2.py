@@ -22,37 +22,17 @@ if model_type == "10m": # if 10m, create according model and load ckpt
     model.load_pretrained("opensr_10m_v4_v2.ckpt") # 10m
 
 model = model.eval()
-
-batch = torch.load("tensor_dict_denorm.pth")
-batch["image"],batch["LR_image"] = batch["image"].cuda(),batch["LR_image"].cuda()
-batch["image"] = rearrange(batch["image"],"b h w c -> b c h w")
-batch["LR_image"] = rearrange(batch["LR_image"],"b h w c -> b c h w")
+model = model.cuda()
 
 
-# get dataloader
-from opensr_model.utils import get_dataloader
 
-# create 20 examples for each SR
-variations_total = []
 
-for v,b in tqdm(enumerate(batch["LR_image"])):
-    b = b.unsqueeze(0)
-
-    variations = []
-    for e in range(20):
-        sr = model(b)
-        sr = sr.squeeze(0)
-        variations.append(sr)
-    variations = torch.stack(variations)
-    variations_total.append(variations)
-    if v==999:
-        break # do only 1st image of batch
-variations_total = torch.stack(variations_total)
-batch["SR_variations"] = variations_total
-
-# denorm LR/HR
-#batch["image"] = linear_transform_4b(batch["image"],stage="denorm")
-#batch["LR_image"] = linear_transform_4b(batch["LR_image"],stage="denorm")
+import torch
+from tqdm import tqdm
+import numpy as np
+import properscoring as ps
+import os
+import matplotlib.pyplot as plt
 
 def convention_stretch_sen2(t):
     # assuming range of t=0..1
@@ -68,18 +48,9 @@ def minmax_stretch(t):
     return(t)
 
 def stre(t):
-    return(t*1.5)
+    return(t*1.9)
 
-
-for v,(hr,lr,srs) in enumerate(zip(batch["image"],batch["LR_image"],batch["SR_variations"])):
-
-    lr,hr = convention_stretch_sen2(lr),convention_stretch_sen2(hr)
-    new_srs = []
-    for x in srs:
-        im_1 = convention_stretch_sen2(x)
-        new_srs.append(im_1)
-    srs = torch.stack(new_srs)
-
+def plot_images(lr,hr,srs,crps):
     # calculate mean and std of tensor
     srs_mean = srs.mean(dim=0)
     srs_stdev = srs.std(dim=0)
@@ -95,6 +66,7 @@ for v,(hr,lr,srs) in enumerate(zip(batch["image"],batch["LR_image"],batch["SR_va
     offset=15
     lr = lr[:,offset//4:im_size//4,offset//4:im_size//4]
     hr = hr[:,offset:im_size,offset:im_size]
+    crps = crps[:,offset:im_size,offset:im_size]
     srs = srs[:,:,offset:im_size,offset:im_size]
     srs_mean = srs_mean[:,offset:im_size,offset:im_size]
     srs_stdev = srs_stdev[:,offset:im_size,offset:im_size]
@@ -112,9 +84,10 @@ for v,(hr,lr,srs) in enumerate(zip(batch["image"],batch["LR_image"],batch["SR_va
     error = minmax_stretch(error).unsqueeze(0)
     interval_size = interval_size.mean(dim=0).unsqueeze(0)
     interval_size = minmax_stretch(interval_size)
+    crps = minmax_stretch(crps)
 
     # plot images
-    fig, ax = plt.subplots(1, 7, figsize=(30, 5))
+    fig, ax = plt.subplots(1, 8, figsize=(35, 5))
 
     # LR
     ax[0].imshow(rearrange(lr, 'c h w -> h w c').cpu().numpy()[:,:,:3])
@@ -150,20 +123,20 @@ for v,(hr,lr,srs) in enumerate(zip(batch["image"],batch["LR_image"],batch["SR_va
     ax[6].imshow(rearrange(interval_size, 'c h w -> h w c').cpu().numpy()[:,:,:3],cmap="gray")
     ax[6].set_title("Interval Size")
     ax[6].axis('off')
+
+    # CRPS
+    ax[7].imshow(rearrange(crps, 'c h w -> h w c')[:,:,:3],cmap="gray")
+    ax[7].set_title("CRPS")
+    ax[7].axis('off')
     
     plt.subplots_adjust(wspace=0.025, hspace=0.025)
 
-    plt.savefig(f"example_{v+1}.png",dpi=300)
+    # get current second in unix time
+    import time
+    now = str(int(time.time()))
+    plt.savefig("images/"+now+".png",dpi=300)
     plt.close()
-    
 
-
-
-# ------------------------------------------------------------------------------
-# Do CRPS
-
-import numpy as np
-import properscoring as ps
 
 def calculate_crps_for_tensors(observation: np.ndarray, predictions: np.ndarray) -> np.ndarray:
     """Calculates the CRPS score for a tensor of observations and predictions.
@@ -185,23 +158,80 @@ def calculate_crps_for_tensors(observation: np.ndarray, predictions: np.ndarray)
                 fcst = predictions[:, c, h, w]
                 crps_score = ps.crps_ensemble(obs, fcst)
                 crps_scores[c, h, w] = crps_score
+
     return crps_scores
 
 
 
-for v,(hr,lr,srs) in enumerate(zip(batch["image"],batch["LR_image"],batch["SR_variations"])):
-    # LR - Observation (C, H, W)
-    observation = torch.clone(lr).cpu()
+model = model.cuda()
 
-    # SR - Predictions (T, C, H, W)
-    predictions = torch.clone(srs).cpu()
 
-    # Calculate CRPS for the entire tensor
-    crps_score = calculate_crps_for_tensors(observation, predictions)
+from opensr_model.utils import linear_transform_4b
+# list all pth files in directory
+import os
+import torch
+import glob
+from tqdm import tqdm
+crps_ls = []
+directory_path = "/data2/simon/xai_data/"
+files = [file for file in os.listdir(directory_path) if file.endswith('.pt')]
+for f in tqdm(files):
+    try:
+        if os.path.exists(directory_path+f):
+            batch = torch.load(directory_path+f)
+    except:
+        continue
 
-    # Calculate the MAE
-    mae_score = np.abs(observation - predictions.mean())
+    variations = []
+    for lr,hr in zip(batch["LR_image"],batch["image"]):
+        lr = rearrange(lr,"h w c -> c h w")
+        hr = rearrange(hr,"h w c -> c h w")
 
-    print("Batch:", v+1)
-    print("Average CRPS for the entire tensor:", crps_score.mean())
-    print("Average MAE for the entire tensor:", mae_score.mean().item())
+        variations_image = []
+        for x in range(2):
+            sr = model(lr.unsqueeze(0).cuda()).squeeze(0)
+            variations_image.append(sr.cpu())
+        variations_image = torch.stack(variations_image)
+        variations.append(variations_image)
+    variations = torch.stack(variations)
+
+    batch["variations"] = variations
+
+    # now for each batch calculate stuff and create images
+    #batch["LR_image"] = linear_transform_4b(batch["LR_image"],stage="denorm")
+    #batch["image"] = linear_transform_4b(batch["image"],stage="denorm")
+
+    for lr,hr,vars in zip(batch["LR_image"],batch["image"],batch["variations"]):
+        lr = rearrange(lr,"h w c -> c h w")
+        hr = rearrange(hr,"h w c -> c h w")
+        crps = calculate_crps_for_tensors(hr.cpu().numpy(),vars.cpu().numpy())
+        crps_ls.append(crps.mean())
+
+        # do image
+        plot_images(lr[:3,:,:],hr[:3,:,:],vars[:,:3,:,:],crps[:3,:,:])
+
+    # save list to have something to work with
+    torch.save(torch.Tensor(crps_ls),"crps_ls.pt")
+
+
+# create  Histogram
+ls = list(torch.load("crps_ls.pt"))
+def h(values,b="auto"):
+    # Calculate the mean
+    mean_value = np.mean(values)
+
+    # Create histogram
+    #bins = np.arange(min(values), max(values) + 1.5) - 0.5  # Adjust bin edges if necessary
+    plt.hist(values, bins=b, alpha=0.7, color='blue', edgecolor='black')
+
+    # Add a line for the mean
+    plt.axvline(mean_value, color='red', linestyle='dashed', linewidth=1)
+    plt.text(mean_value, plt.ylim()[1] * 0.9, f'Mean: {mean_value:.2f}', color = 'red')
+
+    # Add labels and title
+    plt.xlabel('Value')
+    plt.ylabel('Frequency')
+    plt.title('Histogram of CRPS')
+
+    # Show plot
+    plt.show()

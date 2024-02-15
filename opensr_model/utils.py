@@ -80,8 +80,10 @@ def linear_transform_4b(t_input,stage="norm"):
 
 def linear_transform_6b(t_input,stage="norm"):
     # iterate over batches
+    assert stage in ["norm","denorm"]
     bands_c = 5.
     return_ls = []
+    clamp = False
     for t in t_input:
         if stage == "norm":
             # divide according to conventions
@@ -92,7 +94,8 @@ def linear_transform_6b(t_input,stage="norm"):
             t[:,:,4] = t[:,:,4] * (10.0 / bands_c) 
             t[:,:,5] = t[:,:,5] * (10.0 / bands_c) 
             # clamp to get rif of outlier pixels
-            t = t.clamp(0,1)
+            if clamp:
+                t = t.clamp(0,1)
             # bring to -1..+1
             t = (t*2)-1
         if stage == "denorm":
@@ -106,7 +109,8 @@ def linear_transform_6b(t_input,stage="norm"):
             t[:,:,4] = t[:,:,4] * (bands_c / 10.0)
             t[:,:,5] = t[:,:,5] * (bands_c / 10.0)
             # clamp to get rif of outlier pixels
-            t = t.clamp(0,1)
+            if clamp:
+                t = t.clamp(0,1)
         
         # append result to list
         return_ls.append(t)

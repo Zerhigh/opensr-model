@@ -10,6 +10,7 @@ from opensr_model.diffusion.utils import DDIMSampler
 from tqdm import tqdm
 import numpy as np
 from typing import Literal
+import shutil
 
 
 class SRLatentDiffusion(torch.nn.Module):
@@ -300,7 +301,7 @@ class SRLatentDiffusion(torch.nn.Module):
         ddim, latent, time_range = self._prepare_model(
             X=Xnorm, eta=eta, custom_steps=custom_steps, verbose=verbose
         )
-        iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps)
+        iterator = tqdm(time_range, desc="DDIM Sampler", total=custom_steps,disable=True)
 
         # Iterate over the timesteps
         if save_iterations:
@@ -361,10 +362,6 @@ class SRLatentDiffusion(torch.nn.Module):
     def load_pretrained(self, weights_file: str):
         """
         Loads the pretrained model from the given path.
-
-        Args:
-            path (str): The path to the pretrained model.
-            device (str): The device to use.
         """
 
         # download pretrained model
@@ -389,5 +386,123 @@ class SRLatentDiffusion(torch.nn.Module):
         print("Loaded pretrained weights from: ", weights_file)
 
 
+# -----------------------------------------------------------------------------
+# Logic to create PyTorch Lightning Model from dif model
+# Logic to handle outputs from PL model and save them
+# -----------------------------------------------------------------------------
+
+import torch
+import pytorch_lightning
+from pytorch_lightning import LightningModule
+
+class SRLatentDiffusionLightning(LightningModule):
+    """
+    This Pytorch Lightning Class wraps around the torch model to
+    aid in distrubuted GPU processing and optimized dataloaders
+    provided by PL.
+    """
+    def __init__(self,bands: str = "10m", device: Union[str, torch.device] = "cpu",
+                 custom_steps: int = 100):
+        super().__init__()
+        self.model = SRLatentDiffusion(bands=bands,device=device)
+        self.model = self.model.eval()
+        self.custom_steps = custom_steps
+        self.predict_dataset = None
+
+    def forward(self, x):
+        print("Dont call 'forward' on the PL model, instead use 'predict'")
+        return self.model(x,custom_steps=self.custom_steps)
+    
+    def load_pretrained(self, weights_file: str):
+        self.model.load_pretrained(weights_file)
+        print("PL Model: Model loaded from ", weights_file)
+
+    def predict_step(self, x, idx):
+        # perform SR
+        assert self.model.training == False # make sure we're in eval
+        p = self.model.forward(x,custom_steps=self.custom_steps)
+        return(p)
 
 
+"""
+import torch
+import os
+from pytorch_lightning.callbacks import BasePredictionWriter
+class CustomWriter(BasePredictionWriter):
+    
+    #- Applied after each predict step by the predict() of PL model
+    #- this class needs as input the SR object created by opensr-utils
+    #- it writes the results to a temporary folder
+    #- it writes the results to the placeholder file at the end
+    
+    def __init__(self, sr_obj, write_interval="batch"):
+        super().__init__(write_interval)
+        self.sr_obj = sr_obj # save SR obj in class
+
+        # create folder and info to save temporary results
+        base_path = os.path.dirname(self.sr_obj.info_dict["sr_path"])
+        self.temp_path = os.path.join(base_path,"tmp_sr")
+        os.makedirs(self.temp_path, exist_ok=True)
+
+        # if files exist in folder, remove them
+        files = os.listdir(self.temp_path)
+        for file in files:
+            os.remove(os.path.join(self.temp_path,file))
+
+    def write_on_batch_end(self, trainer,
+                           pl_module, prediction,
+                           batch_indices, batch,
+                           batch_idx, dataloader_idx):
+        try:
+            prediction = prediction.cpu()
+        except:
+            pass
+
+        # iterate over predictions and save them accordingly
+        #for pred,idx in zip(prediction,batch_indices):
+        #    self.sr_obj.sr_obj.fill_SR_overlap(pred,idx,self.sr_obj.info_dict)
+
+        # create filename
+        formatted_number_1 = "{:06}".format(batch_indices[0])
+        formatted_number_2 = "{:04d}".format(len(batch_indices))
+        filename = "batch{}__{}batches.pt".format(formatted_number_1,formatted_number_2)
+        # create dictionary out of results and save to disk
+        results_dict = {"sr":prediction,"batch_indices":batch_indices}
+        torch.save(results_dict,os.path.join(self.temp_path,filename))
+        
+        # return nothing in order not to accumulate results
+        return None
+    
+    #def write_all_to_placeholder(self):
+    def on_predict_end(self, trainer, pl_module):
+        
+        #Custom function to be called after all predictions are done
+        
+        # run this only on one GPU
+        if trainer.global_rank == 0:
+            print("Running weighted Patching on Worker:",str(trainer.global_rank),"...")
+            # read all files in folder
+            files = os.listdir(self.temp_path)
+            files = [file for file in files if file.endswith(".pt")] # keep only .pt files
+
+            # iterate over files and save them to placeholder
+            for file in tqdm(files,desc="Saving to PH"):
+                # load file
+                results_dict = torch.load(os.path.join(self.temp_path,file))
+                # iterate over results and save them
+                for pred,idx in zip(results_dict["sr"],results_dict["batch_indices"]):
+                    self.sr_obj.sr_obj.fill_SR_overlap(pred,idx,self.sr_obj.info_dict)
+            
+            # delete temporary folder and all its contents
+            # Make sure the path exists and is a directory
+            if os.path.isdir(self.temp_path):
+                import time 
+                time.sleep(10)
+                # Remove the folder and all its contents
+                shutil.rmtree(self.temp_path)
+                print(f"Data written to disk, temp folder deleted. Finished.")
+            else:
+                print(f"Data written to disk, temp folder not deleted.")
+            return None
+
+"""

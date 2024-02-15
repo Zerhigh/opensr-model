@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # set the type of model, 4x10m or 6x20m
-model_type = "20m"
+model_type = "10m"
 assert model_type in ["10m","20m"], "model_type must be either 10m or 20m"
 
 if model_type == "10m": # if 10m, create according model and load ckpt
@@ -46,13 +46,15 @@ X = safetensors.torch.load_file("demo.safetensors")["lr_data"]
 X = X.to(device)*1
 
 # test a pred --------------------------------------------------------------
-sr = model(X)
+sr = model(X,custom_steps=500)
+sr = sr.cpu()
 fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-ax[0].imshow(rearrange(X[0,:3,:,:], 'c h w -> h w c').numpy())
-ax[1].imshow(rearrange(sr[0,:3,:,:], 'c h w -> h w c').numpy())
-plt.savefig("example.png")
+ax[0].imshow(rearrange(X[0,:3,:,:].cpu()*1.5, 'c h w -> h w c').numpy())
+ax[0].set_title("LR")
+ax[1].imshow(rearrange(sr[0,:3,:,:].cpu()*1.5, 'c h w -> h w c').numpy())
+ax[1].set_title("SR")
+plt.savefig("example_128.png")
 plt.close()
-
 
 # Tun the Explainer -----------------------------------------------------------
 mask = X[0, 0]* 0
