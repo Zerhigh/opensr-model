@@ -408,6 +408,7 @@ class SRLatentDiffusionLightning(LightningModule):
         self.model = self.model.eval()
         self.custom_steps = custom_steps
         self.predict_dataset = None
+        self.mode = "SR" # setting this hardcoded. If we're in xAI, this will get overwritten externally
 
     def forward(self, x):
         print("Dont call 'forward' on the PL model, instead use 'predict'")
@@ -420,8 +421,30 @@ class SRLatentDiffusionLightning(LightningModule):
     def predict_step(self, x, idx):
         # perform SR
         assert self.model.training == False # make sure we're in eval
-        p = self.model.forward(x,custom_steps=self.custom_steps)
-        return(p)
+
+        if self.mode=="SR":
+            p = self.model.forward(x,custom_steps=self.custom_steps)
+            return(p)
+        if self.mode=="xAI":
+            p = self.xai_step(x, idx)
+            return(p)
+    
+    def xai_step(self, x, idx):
+        no_uncertainty = 10 # amount of images to SR
+        variations = []
+        for i in range(no_uncertainty):
+            sr = self.model.forwardl(x)
+            sr = sr.squeeze(0)
+            variations.append(sr.detach().cpu())
+        variations = torch.stack(variations)
+        # Get statistics for xAI
+        srs_mean = variations.mean(dim=0)
+        srs_stdev = variations.std(dim=0)
+        lower_bound = srs_mean-srs_stdev
+        upper_bound = srs_mean+srs_stdev
+        interval_size = srs_stdev*2
+        interval_size = interval_size.mean(dim=0).unsqueeze(0)
+        return interval_size
 
 
 """
