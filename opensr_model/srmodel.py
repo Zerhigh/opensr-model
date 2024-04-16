@@ -433,7 +433,7 @@ class SRLatentDiffusionLightning(LightningModule):
         no_uncertainty = 10 # amount of images to SR
         variations = []
         for i in range(no_uncertainty):
-            sr = self.model.forwardl(x)
+            sr = self.model.forward(x,custom_steps=self.custom_steps)
             sr = sr.squeeze(0)
             variations.append(sr.detach().cpu())
         variations = torch.stack(variations)
