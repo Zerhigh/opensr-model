@@ -11,6 +11,8 @@ from tqdm import tqdm
 import numpy as np
 from typing import Literal
 import shutil
+import random
+import numpy as np
 
 
 class SRLatentDiffusion(torch.nn.Module):
@@ -284,7 +286,7 @@ class SRLatentDiffusion(torch.nn.Module):
                 to 100.
             temperature (float, optional): Temperature to use in the denoiser.
                 Defaults to 1.0. The higher the temperature, the more stochastic
-                the denoiser is.
+                the denoiser is (random noise gets multiplied by this).
             spectral_correction (bool, optional): Apply spectral correction to the SR
                 image, using the LR image as reference. Defaults to True.
 
@@ -402,15 +404,16 @@ class SRLatentDiffusionLightning(LightningModule):
     provided by PL.
     """
     def __init__(self,bands: str = "10m", device: Union[str, torch.device] = "cpu",
-                 custom_steps: int = 100):
+                 custom_steps: int = 100, temperature: float = 1.0):
         super().__init__()
         self.model = SRLatentDiffusion(bands=bands,device=device)
         self.model = self.model.eval()
         self.custom_steps = custom_steps
+        self.temperature = temperature
         self.predict_dataset = None
         self.mode = "SR" # setting this hardcoded. If we're in xAI, this will get overwritten externally
 
-    def forward(self, x):
+    def forward(self, x,**kwargs):
         print("Dont call 'forward' on the PL model, instead use 'predict'")
         return self.model(x,custom_steps=self.custom_steps)
     
@@ -418,12 +421,12 @@ class SRLatentDiffusionLightning(LightningModule):
         self.model.load_pretrained(weights_file)
         print("PL Model: Model loaded from ", weights_file)
 
-    def predict_step(self, x, idx):
+    def predict_step(self, x, idx,**kwargs):
         # perform SR
-        assert self.model.training == False # make sure we're in eval
+        assert self.model.training == False, "Model in Training mode. Abort." # make sure we're in eval
 
         if self.mode=="SR":
-            p = self.model.forward(x,custom_steps=self.custom_steps)
+            p = self.model.forward(x,custom_steps=self.custom_steps,temperature=self.temperature)
             return(p)
         if self.mode=="xAI":
             p = self.xai_step(x, idx)
@@ -431,8 +434,16 @@ class SRLatentDiffusionLightning(LightningModule):
     
     def xai_step(self, x, idx):
         no_uncertainty = 10 # amount of images to SR
-        variations = []
+        rand_seed_list = random.sample(range(1, 9999), no_uncertainty) # list of random seeds
+        variations = [] # empty list to hold variations
         for i in range(no_uncertainty):
+
+            # reseed random number generators for each iteration
+            np.random.seed(rand_seed_list[i])
+            torch.manual_seed(rand_seed_list[i])
+            random.seed(rand_seed_list[i])
+            pytorch_lightning.utilities.seed.seed_everything(seed=rand_seed_list[i],workers=True)
+            
             sr = self.model.forward(x,custom_steps=self.custom_steps)
             sr = sr.squeeze(0)
             variations.append(sr.detach().cpu())

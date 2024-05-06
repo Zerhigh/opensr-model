@@ -7,6 +7,11 @@ old/*
 *.pth
 *.pt
 *.png
+*.ipynb
+*.JSON
+*.json
+ablation.py
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
