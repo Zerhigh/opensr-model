@@ -11,7 +11,8 @@ old/*
 *.JSON
 *.json
 ablation.py
-
+images/
+images/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

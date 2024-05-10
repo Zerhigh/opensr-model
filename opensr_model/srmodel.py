@@ -414,14 +414,14 @@ class SRLatentDiffusionLightning(LightningModule):
         self.mode = "SR" # setting this hardcoded. If we're in xAI, this will get overwritten externally
 
     def forward(self, x,**kwargs):
-        print("Dont call 'forward' on the PL model, instead use 'predict'")
+        #print("Dont call 'forward' on the PL model, instead use 'predict'")
         return self.model(x,custom_steps=self.custom_steps)
     
     def load_pretrained(self, weights_file: str):
         self.model.load_pretrained(weights_file)
         print("PL Model: Model loaded from ", weights_file)
 
-    def predict_step(self, x, idx,**kwargs):
+    def predict_step(self, x, idx: int = 0,**kwargs):
         # perform SR
         assert self.model.training == False, "Model in Training mode. Abort." # make sure we're in eval
 
@@ -433,11 +433,10 @@ class SRLatentDiffusionLightning(LightningModule):
             return(p)
     
     def xai_step(self, x, idx):
-        no_uncertainty = 10 # amount of images to SR
+        no_uncertainty = 15 # amount of images to SR
         rand_seed_list = random.sample(range(1, 9999), no_uncertainty) # list of random seeds
         variations = [] # empty list to hold variations
         for i in range(no_uncertainty):
-
             # reseed random number generators for each iteration
             np.random.seed(rand_seed_list[i])
             torch.manual_seed(rand_seed_list[i])
