@@ -1,6 +1,5 @@
 import pathlib
 from typing import Union
-
 import requests
 import torch
 from opensr_model.diffusion.latentdiffusion import LatentDiffusion
@@ -13,6 +12,10 @@ from typing import Literal
 import shutil
 import random
 import numpy as np
+from einops import rearrange
+from opensr_model.utils import assert_tensor_validity
+from opensr_model.utils import revert_padding
+
 
 
 class SRLatentDiffusion(torch.nn.Module):
@@ -124,7 +127,8 @@ class SRLatentDiffusion(torch.nn.Module):
         self.encode_conditioning = True
         if self.encode_conditioning==True and self.sr_type=="SISR":
             # try to upsample->encode conditioning
-            X_int = torch.nn.functional.interpolate(X, size=(512,512), mode='bilinear', align_corners=False)
+            X_int = torch.nn.functional.interpolate(X, size=(X.shape[-1]*4,X.shape[-1]*4), mode='bilinear', align_corners=False)
+            print(X_int.shape)
             # encode conditioning
             X_enc = self.model.first_stage_model.encode(X_int).sample()
         # move to same device as the model
@@ -200,7 +204,7 @@ class SRLatentDiffusion(torch.nn.Module):
         verbose: bool = False,
         enable_checkpoint = True,
         histogram_matching=True        
-    ):
+    ):  
         # Normalize and encode the LR image
         X = X.clone()
         Xnorm = self._tensor_encode(X)
@@ -295,6 +299,9 @@ class SRLatentDiffusion(torch.nn.Module):
                 Cx(Wx4)x(Hx4) or BxCx(Wx4)x(Hx4).
         """
         
+        # Assert shape, size, dimensionality
+        X,padding = assert_tensor_validity(X)
+
         # Normalize the image
         X = X.clone()
         Xnorm = self._tensor_encode(X)
@@ -328,7 +335,9 @@ class SRLatentDiffusion(torch.nn.Module):
         if save_iterations:
             return save_iters
         
-        return self._tensor_decode(latent, spe_cor=histogram_matching)
+        sr = self._tensor_decode(latent, spe_cor=histogram_matching)
+        sr = revert_padding(sr,padding)
+        return sr
 
 
     def hq_histogram_matching(

@@ -119,3 +119,54 @@ def linear_transform_6b(t_input,stage="norm"):
     t_output = torch.stack(return_ls)
 
     return t_output
+
+def assert_tensor_validity(self,tensor):
+
+    # ASSERT BATCH DIMENSION
+    # if unbatched, add batch dimension
+    if len(tensor.shape)==3:
+        tensor = tensor.unsqueeze(0)
+
+    # ASSERT BxCxHxW ORDER
+    # Check the size of the input tensor
+    if tensor.shape[-1]<10:
+        tensor = rearrange(tensor,"b w h c -> b c h w")
+
+
+    height, width = tensor.shape[-2],tensor.shape[-1]    
+    # Calculate how much padding is needed for height and width
+    if height < 128 or width < 128:
+        pad_height = max(0, 128 - height)  # Amount to pad on height
+        pad_width = max(0, 128 - width)    # Amount to pad on width
+
+        # Padding for height and width needs to be added to both sides of the dimension
+        # The pad has the format (left, right, top, bottom)
+        padding = (pad_width // 2, pad_width - pad_width // 2, pad_height // 2, pad_height - pad_height // 2)
+        self.padding = padding
+        
+        # Apply symmetric padding
+        tensor = torch.nn.functional.pad(tensor, padding, mode='reflect')
+
+    else: # save padding with 0s
+        padding = (0,0,0,0)
+        self.padding = padding
+
+    return tensor,padding
+
+
+
+def revert_padding(self,tensor,padding):
+    left, right, top, bottom = padding
+    # Calculate the indices to slice from the padded tensor
+    start_height = top
+    end_height = tensor.size(-2) - bottom
+    start_width = left
+    end_width = tensor.size(-1) - right
+
+    # account for 4x upsampling Factor
+    start_height,end_height,start_width,end_width = start_height*4,end_height*4,start_width*4,end_width*4
+
+    # Slice the tensor to remove padding
+    unpadded_tensor = tensor[:,:, start_height:end_height, start_width:end_width]
+    return unpadded_tensor
+
