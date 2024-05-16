@@ -128,7 +128,6 @@ class SRLatentDiffusion(torch.nn.Module):
         if self.encode_conditioning==True and self.sr_type=="SISR":
             # try to upsample->encode conditioning
             X_int = torch.nn.functional.interpolate(X, size=(X.shape[-1]*4,X.shape[-1]*4), mode='bilinear', align_corners=False)
-            print(X_int.shape)
             # encode conditioning
             X_enc = self.model.first_stage_model.encode(X_int).sample()
         # move to same device as the model

@@ -14,6 +14,9 @@ old/*
 ablation.py
 images/
 images/*
+images_comparison
+images_comparison/*
+comp_s2_s2naip.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
