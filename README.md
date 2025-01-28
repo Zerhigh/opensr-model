@@ -11,3 +11,5 @@ Some example Sr scenes can be found as [super-resoluted tiffs](https://drive.goo
 
 # Attention
 This is a work in progress and published explicitly as a research preview. A publication is currently in the works. This repository will leave the experimental stage with the publication of v1.0.0. 
+
+[![PyPI Downloads](https://static.pepy.tech/badge/opensr-model)](https://pepy.tech/projects/opensr-model)
